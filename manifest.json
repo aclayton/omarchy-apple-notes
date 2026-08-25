@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "com.omarchy.apple-notes",
+  "name": "Apple Notes",
+  "version": "2.0.0",
+  "author": "Omarchy User",
+  "license": "MIT",
+  "description": "Apple Notes iCloud sync — view status, sync notes, and open your notes directory from the menu bar.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "Widget.qml"
+  },
+  "barWidget": {
+    "displayName": "Apple Notes",
+    "description": "View iCloud connection status and sync Apple Notes",
+    "category": "Productivity",
+    "aliases": [
+      "apple-notes",
+      "icloud-notes",
+      "notes"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

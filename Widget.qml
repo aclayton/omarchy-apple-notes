@@ -20,8 +20,6 @@ Panel {
   readonly property bool isAuthenticated: notesService ? notesService.isAuthenticated : false
   readonly property string lastSyncTime: notesService ? notesService.lastSyncTime : "Never"
   readonly property string localDirectory: notesService ? notesService.localDirectory : "~/.omarchy/apple-notes"
-  readonly property int changedNotesCount: notesService ? notesService.changedNotesCount : 0
-  readonly property var changedNotesList: notesService ? notesService.changedNotesList : []
   readonly property string connectionStatus: notesService ? notesService.connectionStatus : "Disconnected"
   readonly property string errorMessage: notesService ? notesService.errorMessage : ""
   
@@ -68,18 +66,22 @@ Panel {
   function syncNotes() {
     if (notesService) {
       widgetError = ""
+      console.log("[apple-notes] widget: syncNotes() requested")
       notesService.syncNotes()
     } else {
       widgetError = "No notes service available. The Apple Notes service may not be running."
+      console.warn("[apple-notes] widget: syncNotes() — no service available")
     }
   }
   
   function authenticate() {
     if (notesService) {
       widgetError = ""
+      console.log("[apple-notes] widget: authenticate() requested")
       notesService.authenticate()
     } else {
       widgetError = "No notes service available. The Apple Notes service may not be running."
+      console.warn("[apple-notes] widget: authenticate() — no service available")
     }
   }
   
@@ -94,6 +96,30 @@ Panel {
   }
   
   readonly property string formattedLastSyncTime: root.formatSyncTime(lastSyncTime)
+  
+  // Measure the widest sync-info values so the panel can grow to fit long
+  // directory paths instead of eliding them. `fittedContentWidth` still caps
+  // the result at the screen's available width, so this stays bounded.
+  TextMetrics {
+    id: dirMetrics
+    text: root.localDirectory
+    font.family: root.bar ? root.bar.fontFamily : ""
+    font.pixelSize: Style.font.bodySmall
+  }
+  
+  TextMetrics {
+    id: labelMetrics
+    text: "Local Directory:"
+    font.family: root.bar ? root.bar.fontFamily : ""
+    font.pixelSize: Style.font.bodySmall
+  }
+  
+  readonly property int desiredContentWidth: {
+    var valueW = Math.max(dirMetrics.width, Style.space(120))
+    var labelW = Math.max(labelMetrics.width, Style.space(80))
+    var desired = labelW + valueW + Style.space(30)
+    return Math.max(Style.space(300), desired)
+  }
   
   // Poll the service for fresh status and stamp when it happened. Falls back
   // to the legacy method name so the widget keeps working across the service
@@ -138,7 +164,7 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(300))
+    contentWidth: panel.fittedContentWidth(root.desiredContentWidth)
     contentHeight: panel.fittedContentHeight(column.implicitHeight)
     
     PanelKeyCatcher {
@@ -323,21 +349,6 @@ Panel {
             }
             
             Text {
-              text: "Changed Notes:"
-              color: root.bar.foreground
-              font.family: root.bar.fontFamily
-              font.pixelSize: Style.font.bodySmall
-              opacity: 0.7
-            }
-            
-            Text {
-              text: root.changedNotesCount.toString()
-              color: root.bar.foreground
-              font.family: root.bar.fontFamily
-              font.pixelSize: Style.font.bodySmall
-            }
-            
-            Text {
               text: "Last Checked:"
               color: root.bar.foreground
               font.family: root.bar.fontFamily
@@ -352,57 +363,6 @@ Panel {
               font.pixelSize: Style.font.bodySmall
               elide: Text.ElideRight
               width: parent.width * 0.7
-            }
-          }
-        }
-        
-        // ---------- Changed Notes List ----------
-        Column {
-          width: parent.width
-          spacing: Style.space(8)
-          visible: root.changedNotesCount > 0
-          
-          Text {
-            text: "Recently Changed Notes"
-            color: root.bar.foreground
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.body
-            font.bold: true
-          }
-          
-          Repeater {
-            model: root.changedNotesList
-            
-            Rectangle {
-              width: parent.width
-              height: noteColumn.implicitHeight + Style.space(8)
-              color: Qt.rgba(root.bar.foreground.r, root.bar.foreground.g, root.bar.foreground.b, 0.1)
-              radius: 4
-              
-              Column {
-                id: noteColumn
-                anchors { left: parent.left; right: parent.right; top: parent.top; margins: Style.space(4) }
-                spacing: Style.space(2)
-                
-                Text {
-                  text: modelData.title
-                  color: root.bar.foreground
-                  font.family: root.bar.fontFamily
-                  font.pixelSize: Style.font.body
-                  font.bold: true
-                  elide: Text.ElideRight
-                  width: parent.width
-                }
-                
-                Text {
-                  text: "Modified: " + modelData.modified
-                  color: Qt.darker(root.bar.foreground, 1.4)
-                  font.family: root.bar.fontFamily
-                  font.pixelSize: Style.font.caption
-                  elide: Text.ElideRight
-                  width: parent.width
-                }
-              }
             }
           }
         }

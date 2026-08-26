@@ -16,8 +16,6 @@ Item {
   property bool isAuthenticated: false
   property string lastSyncTime: "Never"
   property string localDirectory: _notesDir
-  property int changedNotesCount: 0
-  property var changedNotesList: []
   property string connectionStatus: "Disconnected"  // Disconnected | Connecting… | Connected | Syncing… | Cloning…
   property string errorMessage: ""
 
@@ -26,8 +24,7 @@ Item {
   readonly property bool busy:
     verifyAuthProcess.running || reauthProcess.running ||
     pullProcess.running || pushProcess.running ||
-    statusProcess.running || cloneProcess.running ||
-    findProcess.running
+    statusProcess.running || cloneProcess.running
 
   property string _pendingAction: ""   // "authenticate" | "sync"
 
@@ -39,8 +36,6 @@ Item {
   property string _statusError: ""
   property string _cloneOutput: ""
   property string _cloneError: ""
-  property string _findOutput: ""
-  property string _findError: ""
 
   // ── Public methods ─────────────────────────────────────────────────
 
@@ -50,6 +45,7 @@ Item {
 
   function authenticate() {
     if (verifyAuthProcess.running || reauthProcess.running) return
+    console.log("[apple-notes] authenticate(): verifying auth")
     root.clearError()
     root.connectionStatus = "Connecting..."
     root._pendingAction = "authenticate"
@@ -61,6 +57,7 @@ Item {
 
   function syncNotes() {
     if (pullProcess.running || pushProcess.running) return
+    console.log("[apple-notes] syncNotes(): isAuthenticated=" + root.isAuthenticated)
     root.clearError()
     if (root.isAuthenticated) {
       _startPull()
@@ -74,6 +71,7 @@ Item {
   }
 
   function _startPull() {
+    console.log("[apple-notes] pulling from iCloud…")
     root.connectionStatus = "Syncing..."
     root._syncOutput = ""
     root._syncError = ""
@@ -82,22 +80,16 @@ Item {
   }
 
   function _startPush() {
+    console.log("[apple-notes] pushing to iCloud…")
     root._syncOutput = ""
     root._syncError = ""
     pushProcess.command = ["icloud-md", "push", root._notesDir]
     pushProcess.running = true
   }
 
-  function refreshChangedNotes() {
-    if (findProcess.running) return
-    root._findOutput = ""
-    root._findError = ""
-    findProcess.command = ["find", root._notesDir, "-name", "*.md", "-printf", "%T@ %p\\n"]
-    findProcess.running = true
-  }
-
   function getStatus() {
     if (statusProcess.running) return
+    console.log("[apple-notes] refreshing status")
     root._statusOutput = ""
     root._statusError = ""
     statusProcess.command = ["icloud-md", "status", root._notesDir, "--json"]
@@ -106,6 +98,7 @@ Item {
 
   function cloneNotes() {
     if (cloneProcess.running) return
+    console.log("[apple-notes] cloneNotes(): initial clone requested")
     root.clearError()
     root.connectionStatus = "Cloning..."
     root._cloneOutput = ""
@@ -115,39 +108,6 @@ Item {
   }
 
   // ── Helpers ────────────────────────────────────────────────────────
-
-  function _formatTime(ts) {
-    var secs = parseFloat(ts)
-    if (!isFinite(secs) || secs <= 0) return "Unknown"
-    var d = new Date(secs * 1000)
-    return d.toLocaleString()
-  }
-
-  function _parseFindOutput(raw) {
-    var list = []
-    var lines = String(raw || "").split("\n")
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i].trim()
-      if (line === "") continue
-      var spaceIdx = line.indexOf(" ")
-      if (spaceIdx < 0) continue
-      var ts = parseFloat(line.substring(0, spaceIdx))
-      var path = line.substring(spaceIdx + 1)
-      if (!isFinite(ts)) continue
-      var parts = path.split("/")
-      var fname = parts[parts.length - 1]
-      var title = fname.replace(/\.md$/, "")
-      list.push({
-        title: title,
-        fileName: path,
-        modified: root._formatTime(ts),
-        _ts: ts
-      })
-    }
-    list.sort(function(a, b) { return b._ts - a._ts })
-    list = list.slice(0, 10)
-    return list
-  }
 
   function _applyStatus(raw) {
     try {
@@ -162,7 +122,7 @@ Item {
         root.connectionStatus = "Connected"
       }
     } catch (e) {
-      console.log("Apple Notes: failed to parse status JSON:", e.message)
+      console.warn("[apple-notes] failed to parse status JSON:", e.message)
     }
   }
 
@@ -172,7 +132,12 @@ Item {
     id: mkdirProcess
     running: false
     command: []
-    onExited: {
+    onExited: function(exitCode) {
+      if (exitCode === 0) {
+        console.log("[apple-notes] notes directory ready:", root._notesDir)
+      } else {
+        console.warn("[apple-notes] could not create notes directory (exit " + exitCode + ")")
+      }
       root.getStatus()
     }
   }
@@ -188,6 +153,7 @@ Item {
       root._pendingAction = ""
 
       if (exitCode === 0) {
+        console.log("[apple-notes] verify-auth OK (authenticated)")
         root.isAuthenticated = true
         root.connectionStatus = "Connected"
         root.lastSyncTime = new Date().toLocaleString()
@@ -197,6 +163,7 @@ Item {
           root._startPull()
         }
       } else {
+        console.warn("[apple-notes] verify-auth failed (exit " + exitCode + "), action=" + action)
         if (action === "authenticate") {
           root._authOutput = ""
           root._authError = ""
@@ -218,11 +185,13 @@ Item {
     stderr: StdioCollector { id: reauthStderr; waitForEnd: true; onStreamFinished: root._authError = text }
     onExited: function(exitCode) {
       if (exitCode === 0) {
+        console.log("[apple-notes] reauthenticate OK")
         root.isAuthenticated = true
         root.connectionStatus = "Connected"
         root.lastSyncTime = new Date().toLocaleString()
         root.errorMessage = ""
       } else {
+        console.warn("[apple-notes] reauthenticate failed (exit " + exitCode + ")")
         root.isAuthenticated = false
         root.connectionStatus = "Disconnected"
         root.errorMessage = root._authError || root._authOutput || "Authentication failed"
@@ -238,8 +207,10 @@ Item {
     stderr: StdioCollector { id: pullStderr; waitForEnd: true; onStreamFinished: root._syncError = text }
     onExited: function(exitCode) {
       if (exitCode === 0) {
+        console.log("[apple-notes] pull OK")
         root._startPush()
       } else {
+        console.warn("[apple-notes] pull failed (exit " + exitCode + "): " + (root._syncError || root._syncOutput))
         root.connectionStatus = "Connected"
         root.errorMessage = root._syncError || root._syncOutput || "Pull failed"
       }
@@ -254,11 +225,12 @@ Item {
     stderr: StdioCollector { id: pushStderr; waitForEnd: true; onStreamFinished: root._syncError = text }
     onExited: function(exitCode) {
       if (exitCode === 0) {
+        console.log("[apple-notes] push OK — sync complete")
         root.lastSyncTime = new Date().toLocaleString()
         root.connectionStatus = "Connected"
         root.errorMessage = ""
-        root.refreshChangedNotes()
       } else {
+        console.warn("[apple-notes] push failed (exit " + exitCode + "): " + (root._syncError || root._syncOutput))
         root.connectionStatus = "Connected"
         root.errorMessage = root._syncError || root._syncOutput || "Push failed"
       }
@@ -274,9 +246,11 @@ Item {
     onExited: function(exitCode) {
       if (exitCode === 0) {
         root._applyStatus(root._statusOutput)
+      } else {
+        // Non-zero exit is not necessarily fatal — may just mean the
+        // directory hasn't been set up yet.
+        console.log("[apple-notes] status exited " + exitCode + " (vault may not be set up yet)")
       }
-      // Non-zero exit from status is not necessarily fatal — may just mean
-      // the directory hasn't been set up yet.
     }
   }
 
@@ -288,29 +262,15 @@ Item {
     stderr: StdioCollector { id: cloneStderr; waitForEnd: true; onStreamFinished: root._cloneError = text }
     onExited: function(exitCode) {
       if (exitCode === 0) {
+        console.log("[apple-notes] clone OK")
         root.isAuthenticated = true
         root.connectionStatus = "Connected"
         root.lastSyncTime = new Date().toLocaleString()
         root.errorMessage = ""
-        root.refreshChangedNotes()
       } else {
+        console.warn("[apple-notes] clone failed (exit " + exitCode + "): " + (root._cloneError || root._cloneOutput))
         root.connectionStatus = "Disconnected"
         root.errorMessage = root._cloneError || root._cloneOutput || "Clone failed"
-      }
-    }
-  }
-
-  Process {
-    id: findProcess
-    running: false
-    command: []
-    stdout: StdioCollector { id: findStdout; waitForEnd: true; onStreamFinished: root._findOutput = text }
-    stderr: StdioCollector { id: findStderr; waitForEnd: true; onStreamFinished: root._findError = text }
-    onExited: function(exitCode) {
-      if (exitCode === 0) {
-        var list = root._parseFindOutput(root._findOutput)
-        root.changedNotesList = list
-        root.changedNotesCount = list.length
       }
     }
   }
@@ -318,7 +278,7 @@ Item {
   // ── Initialization ─────────────────────────────────────────────────
 
   Component.onCompleted: {
-    console.log("Apple Notes service initialized")
+    console.log("[apple-notes] service initialized, notes dir = " + root._notesDir)
     mkdirProcess.command = ["mkdir", "-p", root._notesDir]
     mkdirProcess.running = true
   }
